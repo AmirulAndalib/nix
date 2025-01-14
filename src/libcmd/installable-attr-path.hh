@@ -1,7 +1,9 @@
+#pragma once
+///@file
+
 #include "globals.hh"
 #include "installable-value.hh"
 #include "outputs-spec.hh"
-#include "util.hh"
 #include "command.hh"
 #include "attr-path.hh"
 #include "common-eval-args.hh"

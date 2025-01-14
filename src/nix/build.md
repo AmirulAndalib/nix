@@ -40,11 +40,23 @@ R""(
   lrwxrwxrwx 1 … ./result-dev -> /nix/store/dkm3gwl0xrx0wrw6zi5x3px3lpgjhlw4-glibc-2.32-dev
   ```
 
+* Build all outputs:
+
+  ```console
+  # nix build "nixpkgs#openssl^*" --print-out-paths
+  /nix/store/gvad6v0cmq1qccmc4wphsazqbj0xzjsl-openssl-3.0.13-bin
+  /nix/store/a07jqdrc8afnk8r6f3lnhh4gvab7chk4-openssl-3.0.13-debug
+  /nix/store/yg75achq89wgqn2fi3gglgsd77kjpi03-openssl-3.0.13-dev
+  /nix/store/bvdcihi8c88fw31cg6gzzmpnwglpn1jv-openssl-3.0.13-doc
+  /nix/store/gjqcvq47cmxazxga0cirspm3jywkmvfv-openssl-3.0.13-man
+  /nix/store/7nmrrad8skxr47f9hfl3xc0pfqmwq51b-openssl-3.0.13
+  ```
+
 * Build attribute `build.x86_64-linux` from (non-flake) Nix expression
   `release.nix`:
 
   ```console
-  # nix build -f release.nix build.x86_64-linux
+  # nix build --file release.nix build.x86_64-linux
   ```
 
 * Build a NixOS system configuration from a flake, and make a profile

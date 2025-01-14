@@ -5,6 +5,7 @@
 #include "regex-combinators.hh"
 #include "outputs-spec.hh"
 #include "path-regex.hh"
+#include "strings-inline.hh"
 
 namespace nix {
 
@@ -17,7 +18,7 @@ bool OutputsSpec::contains(const std::string & outputName) const
         [&](const OutputsSpec::Names & outputNames) {
             return outputNames.count(outputName) > 0;
         },
-    }, raw());
+    }, raw);
 }
 
 static std::string outputSpecRegexStr =
@@ -29,16 +30,15 @@ std::optional<OutputsSpec> OutputsSpec::parseOpt(std::string_view s)
 {
     static std::regex regex(std::string { outputSpecRegexStr });
 
-    std::smatch match;
-    std::string s2 { s }; // until some improves std::regex
-    if (!std::regex_match(s2, match, regex))
+    std::cmatch match;
+    if (!std::regex_match(s.cbegin(), s.cend(), match, regex))
         return std::nullopt;
 
     if (match[1].matched)
         return { OutputsSpec::All {} };
 
     if (match[2].matched)
-        return OutputsSpec::Names { tokenizeString<StringSet>(match[2].str(), ",") };
+        return OutputsSpec::Names { tokenizeString<StringSet>({match[2].first, match[2].second}, ",") };
 
     assert(false);
 }
@@ -49,7 +49,7 @@ OutputsSpec OutputsSpec::parse(std::string_view s)
     std::optional spec = parseOpt(s);
     if (!spec)
         throw Error("invalid outputs specifier '%s'", s);
-    return *spec;
+    return std::move(*spec);
 }
 
 
@@ -63,7 +63,7 @@ std::optional<std::pair<std::string_view, ExtendedOutputsSpec>> ExtendedOutputsS
     auto specOpt = OutputsSpec::parseOpt(s.substr(found + 1));
     if (!specOpt)
         return std::nullopt;
-    return std::pair { s.substr(0, found), ExtendedOutputsSpec::Explicit { *std::move(specOpt) } };
+    return std::pair { s.substr(0, found), ExtendedOutputsSpec::Explicit { std::move(*specOpt) } };
 }
 
 
@@ -85,7 +85,7 @@ std::string OutputsSpec::to_string() const
         [&](const OutputsSpec::Names & outputNames) -> std::string {
             return concatStringsSep(",", outputNames);
         },
-    }, raw());
+    }, raw);
 }
 
 
@@ -98,7 +98,7 @@ std::string ExtendedOutputsSpec::to_string() const
         [&](const ExtendedOutputsSpec::Explicit & outputSpec) -> std::string {
             return "^" + outputSpec.to_string();
         },
-    }, raw());
+    }, raw);
 }
 
 
@@ -118,9 +118,9 @@ OutputsSpec OutputsSpec::union_(const OutputsSpec & that) const
                     ret.insert(thoseNames.begin(), thoseNames.end());
                     return ret;
                 },
-            }, that.raw());
+            }, that.raw);
         },
-    }, raw());
+    }, raw);
 }
 
 
@@ -142,9 +142,9 @@ bool OutputsSpec::isSubsetOf(const OutputsSpec & that) const
                             ret = false;
                     return ret;
                 },
-            }, raw());
+            }, raw);
         },
-    }, that.raw());
+    }, that.raw);
 }
 
 }
@@ -153,7 +153,10 @@ namespace nlohmann {
 
 using namespace nix;
 
-OutputsSpec adl_serializer<OutputsSpec>::from_json(const json & json) {
+#ifndef DOXYGEN_SKIP
+
+OutputsSpec adl_serializer<OutputsSpec>::from_json(const json & json)
+{
     auto names = json.get<StringSet>();
     if (names == StringSet({"*"}))
         return OutputsSpec::All {};
@@ -161,7 +164,8 @@ OutputsSpec adl_serializer<OutputsSpec>::from_json(const json & json) {
         return OutputsSpec::Names { std::move(names) };
 }
 
-void adl_serializer<OutputsSpec>::to_json(json & json, OutputsSpec t) {
+void adl_serializer<OutputsSpec>::to_json(json & json, OutputsSpec t)
+{
     std::visit(overloaded {
         [&](const OutputsSpec::All &) {
             json = std::vector<std::string>({"*"});
@@ -169,11 +173,11 @@ void adl_serializer<OutputsSpec>::to_json(json & json, OutputsSpec t) {
         [&](const OutputsSpec::Names & names) {
             json = names;
         },
-    }, t.raw());
+    }, t.raw);
 }
 
-
-ExtendedOutputsSpec adl_serializer<ExtendedOutputsSpec>::from_json(const json & json) {
+ExtendedOutputsSpec adl_serializer<ExtendedOutputsSpec>::from_json(const json & json)
+{
     if (json.is_null())
         return ExtendedOutputsSpec::Default {};
     else {
@@ -181,7 +185,8 @@ ExtendedOutputsSpec adl_serializer<ExtendedOutputsSpec>::from_json(const json & 
     }
 }
 
-void adl_serializer<ExtendedOutputsSpec>::to_json(json & json, ExtendedOutputsSpec t) {
+void adl_serializer<ExtendedOutputsSpec>::to_json(json & json, ExtendedOutputsSpec t)
+{
     std::visit(overloaded {
         [&](const ExtendedOutputsSpec::Default &) {
             json = nullptr;
@@ -189,7 +194,9 @@ void adl_serializer<ExtendedOutputsSpec>::to_json(json & json, ExtendedOutputsSp
         [&](const ExtendedOutputsSpec::Explicit & e) {
             adl_serializer<OutputsSpec>::to_json(json, e);
         },
-    }, t.raw());
+    }, t.raw);
 }
+
+#endif
 
 }

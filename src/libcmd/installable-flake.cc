@@ -28,6 +28,11 @@ namespace nix {
 std::vector<std::string> InstallableFlake::getActualAttrPaths()
 {
     std::vector<std::string> res;
+    if (attrPaths.size() == 1 && attrPaths.front().starts_with(".")){
+        attrPaths.front().erase(0,1);
+        res.push_back(attrPaths.front());
+        return res;
+    }
 
     for (auto & prefix : prefixes)
         res.push_back(prefix + *attrPaths.begin());
@@ -36,20 +41,6 @@ std::vector<std::string> InstallableFlake::getActualAttrPaths()
         res.push_back(s);
 
     return res;
-}
-
-Value * InstallableFlake::getFlakeOutputs(EvalState & state, const flake::LockedFlake & lockedFlake)
-{
-    auto vFlake = state.allocValue();
-
-    callFlake(state, lockedFlake, *vFlake);
-
-    auto aOutputs = vFlake->attrs->get(state.symbols.create("outputs"));
-    assert(aOutputs);
-
-    state.forceValue(*aOutputs->value, [&]() { return aOutputs->value->determinePos(noPos); });
-
-    return aOutputs->value;
 }
 
 static std::string showAttrPaths(const std::vector<std::string> & paths)
@@ -95,47 +86,35 @@ DerivedPathsWithInfo InstallableFlake::toDerivedPaths()
         // FIXME: use eval cache?
         auto v = attr->forceValue();
 
-        if (v.type() == nPath) {
-            PathSet context;
-            auto storePath = state->copyPathToStore(context, Path(v.path));
-            return {{
-                .path = DerivedPath::Opaque {
-                    .path = std::move(storePath),
-                }
-            }};
+        if (std::optional derivedPathWithInfo = trySinglePathToDerivedPaths(
+            v,
+            noPos,
+            fmt("while evaluating the flake output attribute '%s'", attrPath)))
+        {
+            return { *derivedPathWithInfo };
+        } else {
+            throw Error(
+                "expected flake output attribute '%s' to be a derivation or path but found %s: %s",
+                attrPath,
+                showType(v),
+                ValuePrinter(*this->state, v, errorPrintOptions)
+            );
         }
-
-        else if (v.type() == nString) {
-            PathSet context;
-            auto s = state->forceString(v, context, noPos, fmt("while evaluating the flake output attribute '%s'", attrPath));
-            auto storePath = state->store->maybeParseStorePath(s);
-            if (storePath && context.count(std::string(s))) {
-                return {{
-                    .path = DerivedPath::Opaque {
-                        .path = std::move(*storePath),
-                    }
-                }};
-            } else
-                throw Error("flake output attribute '%s' evaluates to the string '%s' which is not a store path", attrPath, s);
-        }
-
-        else
-            throw Error("flake output attribute '%s' is not a derivation or path", attrPath);
     }
 
     auto drvPath = attr->forceDerivation();
 
-    std::optional<NixInt> priority;
+    std::optional<NixInt::Inner> priority;
 
     if (attr->maybeGetAttr(state->sOutputSpecified)) {
     } else if (auto aMeta = attr->maybeGetAttr(state->sMeta)) {
         if (auto aPriority = aMeta->maybeGetAttr("priority"))
-            priority = aPriority->getInt();
+            priority = aPriority->getInt().value;
     }
 
     return {{
         .path = DerivedPath::Built {
-            .drvPath = std::move(drvPath),
+            .drvPath = makeConstantStorePathRef(std::move(drvPath)),
             .outputs = std::visit(overloaded {
                 [&](const ExtendedOutputsSpec::Default & d) -> OutputsSpec {
                     std::set<std::string> outputsToInstall;
@@ -158,15 +137,18 @@ DerivedPathsWithInfo InstallableFlake::toDerivedPaths()
                 [&](const ExtendedOutputsSpec::Explicit & e) -> OutputsSpec {
                     return e;
                 },
-            }, extendedOutputsSpec.raw()),
+            }, extendedOutputsSpec.raw),
         },
-        .info = {
-            .priority = priority,
-            .originalRef = flakeRef,
-            .resolvedRef = getLockedFlake()->flake.lockedRef,
-            .attrPath = attrPath,
-            .extendedOutputsSpec = extendedOutputsSpec,
-        }
+        .info = make_ref<ExtraPathInfoFlake>(
+            ExtraPathInfoValue::Value {
+                .priority = priority,
+                .attrPath = attrPath,
+                .extendedOutputsSpec = extendedOutputsSpec,
+            },
+            ExtraPathInfoFlake::Flake {
+                .originalRef = flakeRef,
+                .lockedRef = getLockedFlake()->flake.lockedRef,
+            }),
     }};
 }
 
@@ -212,8 +194,10 @@ std::shared_ptr<flake::LockedFlake> InstallableFlake::getLockedFlake() const
 {
     if (!_lockedFlake) {
         flake::LockFlags lockFlagsApplyConfig = lockFlags;
+        // FIXME why this side effect?
         lockFlagsApplyConfig.applyNixConfig = true;
-        _lockedFlake = std::make_shared<flake::LockedFlake>(lockFlake(*state, flakeRef, lockFlagsApplyConfig));
+        _lockedFlake = std::make_shared<flake::LockedFlake>(lockFlake(
+            flakeSettings, *state, flakeRef, lockFlagsApplyConfig));
     }
     return _lockedFlake;
 }
@@ -229,7 +213,7 @@ FlakeRef InstallableFlake::nixpkgsFlakeRef() const
         }
     }
 
-    return Installable::nixpkgsFlakeRef();
+    return defaultNixpkgsFlakeRef();
 }
 
 }
