@@ -5,9 +5,9 @@
 
 using namespace nix;
 
-struct CmdRealisation : virtual NixMultiCommand
+struct CmdRealisation : NixMultiCommand
 {
-    CmdRealisation() : MultiCommand(RegisterCommand::getCommandsFor({"realisation"}))
+    CmdRealisation() : NixMultiCommand("realisation", RegisterCommand::getCommandsFor({"realisation"}))
     { }
 
     std::string description() override
@@ -16,13 +16,6 @@ struct CmdRealisation : virtual NixMultiCommand
     }
 
     Category category() override { return catUtility; }
-
-    void run() override
-    {
-        if (!command)
-            throw UsageError("'nix realisation' requires a sub-command.");
-        command->second->run();
-    }
 };
 
 static auto rCmdRealisation = registerCommand<CmdRealisation>("realisation");
@@ -43,9 +36,9 @@ struct CmdRealisationInfo : BuiltPathsCommand, MixJSON
 
     Category category() override { return catSecondary; }
 
-    void run(ref<Store> store, BuiltPaths && paths) override
+    void run(ref<Store> store, BuiltPaths && paths, BuiltPaths && rootPaths) override
     {
-        settings.requireExperimentalFeature(Xp::CaDerivations);
+        experimentalFeatureSettings.require(Xp::CaDerivations);
         RealisedPath::Set realisations;
 
         for (auto & builtPath : paths) {

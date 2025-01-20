@@ -10,19 +10,15 @@ std::string InstallableDerivedPath::what() const
 
 DerivedPathsWithInfo InstallableDerivedPath::toDerivedPaths()
 {
-    return {{.path = derivedPath, .info = {} }};
+    return {{
+        .path = derivedPath,
+        .info = make_ref<ExtraPathInfo>(),
+    }};
 }
 
 std::optional<StorePath> InstallableDerivedPath::getStorePath()
 {
-    return std::visit(overloaded {
-        [&](const DerivedPath::Built & bfd) {
-            return bfd.drvPath;
-        },
-        [&](const DerivedPath::Opaque & bo) {
-            return bo.path;
-        },
-    }, derivedPath.raw());
+    return derivedPath.getBaseStorePath();
 }
 
 InstallableDerivedPath InstallableDerivedPath::parse(
@@ -36,28 +32,20 @@ InstallableDerivedPath InstallableDerivedPath::parse(
         // store path.
         [&](const ExtendedOutputsSpec::Default &) -> DerivedPath {
             auto storePath = store->followLinksToStorePath(prefix);
-            // Remove this prior to stabilizing the new CLI.
-            if (storePath.isDerivation()) {
-                auto oldDerivedPath = DerivedPath::Built {
-                    .drvPath = storePath,
-                    .outputs = OutputsSpec::All { },
-                };
-                warn(
-                    "The interpretation of store paths arguments ending in `.drv` recently changed. If this command is now failing try again with '%s'",
-                    oldDerivedPath.to_string(*store));
-            };
             return DerivedPath::Opaque {
                 .path = std::move(storePath),
             };
         },
         // If the user did use ^, we just do exactly what is written.
         [&](const ExtendedOutputsSpec::Explicit & outputSpec) -> DerivedPath {
+            auto drv = make_ref<SingleDerivedPath>(SingleDerivedPath::parse(*store, prefix));
+            drvRequireExperiment(*drv);
             return DerivedPath::Built {
-                .drvPath = store->parseStorePath(prefix),
+                .drvPath = std::move(drv),
                 .outputs = outputSpec,
             };
         },
-    }, extendedOutputsSpec.raw());
+    }, extendedOutputsSpec.raw);
     return InstallableDerivedPath {
         store,
         std::move(derivedPath),
